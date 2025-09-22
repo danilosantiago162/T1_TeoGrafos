@@ -8,7 +8,7 @@
 
 // ---------- Criação ----------
 Grafo* cria_grafo(int n, int representacao) {
-    Grafo *g = malloc(sizeof(Grafo));   // ✅ cria um ponteiro para struct
+    Grafo *g = malloc(sizeof(Grafo));   
     if (!g) return NULL;
 
     g->n = n;
@@ -31,9 +31,6 @@ Grafo* cria_grafo(int n, int representacao) {
     }
     return g;
 }
-
-// (outras funções: le_grafo_arquivo, salva_informacoes etc. ficam iguais,
-// só precisam usar Grafo* e acessar com -> )
 
 // ---------- Leitura ----------
 Grafo* le_grafo_arquivo(const char *filename, int representacao) {
@@ -90,7 +87,7 @@ double grau_medio(Grafo *g) {
 
 double grau_mediana(Grafo *g) {
     int *copia = malloc(g->n * sizeof(int));
-    if (!copia) return 0.0; // ou tratar erro apropriadamente
+    if (!copia) return 0.0; 
     memcpy(copia, g->grau, g->n * sizeof(int));
     for (int i = 0; i < g->n-1; i++)
         for (int j = i+1; j < g->n; j++)
@@ -168,7 +165,7 @@ void bfs(Grafo *g, int inicio, const char *saida) {
     if (!f) { perror("Erro ao salvar BFS"); return; }
 
     fprintf(f, "BFS a partir do vertice %d\n", inicio+1);
-    printf("BFS a partir do vertice %d\n", inicio+1);  // <-- também no terminal
+    printf("BFS a partir do vertice %d\n", inicio+1);  
 
     for (int i = 0; i < g->n; i++) {
         fprintf(f, "Vertice %d: pai = %d, nivel = %d\n",
@@ -189,8 +186,7 @@ void bfs(Grafo *g, int inicio, const char *saida) {
 void dfs_visit(Grafo *g, int u, int *visitado, int *pai, int *nivel, int nivel_atual, FILE *f) {
     visitado[u] = 1;
     nivel[u] = nivel_atual;
-
-    // imprime no arquivo e no terminal
+    
     fprintf(f, "Vertice %d: pai = %d, nivel = %d\n",
             u+1,
             (pai[u] == -1 ? -1 : pai[u]+1),
@@ -278,7 +274,7 @@ int* bfs_distancias(Grafo *g, int inicio) {
     }
 
     free(fila);
-    return dist; // vetor com as distâncias a partir de inicio
+    return dist; 
 }
 
 int distancia(Grafo *g, int u, int v) {
@@ -340,6 +336,37 @@ void componentes_conexas(Grafo *g, const char *saida) {
     fclose(f);
 }
 
+int diametro(Grafo *g) {
+    if (g->n == 0) return 0;
+
+    int *dist1 = bfs_distancias(g, 1);
+    int v = 1, max_dist = -1;
+
+    for (int i = 0; i < g->n; i++) {
+        if (dist1[i] > max_dist) {
+            max_dist = dist1[i];
+            v = i + 1;
+        }
+    }
+    free(dist1);
+
+    if (max_dist == -1) {
+        // Grafo desconexo (nenhum vértice acessível)
+        return -1;
+    }
+
+    int *dist2 = bfs_distancias(g, v);
+    max_dist = -1;
+    for (int i = 0; i < g->n; i++) {
+        if (dist2[i] > max_dist) {
+            max_dist = dist2[i];
+        }
+    }
+    free(dist2);
+
+    return max_dist;
+}
+
 void libera_grafo(Grafo* g) {
     if (g->representacao == 0) {
         for (int i = 0; i < g->n; i++) free(g->matriz[i]);
@@ -350,4 +377,5 @@ void libera_grafo(Grafo* g) {
     }
     free(g->grau);
     free(g);
+
 }
