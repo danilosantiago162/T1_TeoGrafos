@@ -298,7 +298,6 @@ void componentes_conexas(Grafo *g, const char *saida) {
             componente++;
             int qtd = 0;
 
-            // BFS para percorrer a componente
             int *fila = (int) malloc(g->n * sizeof(int));
             int inicio = 0, fim = 0;
 
@@ -379,3 +378,4 @@ void libera_grafo(Grafo* g) {
     free(g);
 
 }
+
