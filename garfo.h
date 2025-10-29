@@ -35,4 +35,20 @@ int diametro(Grafo *g);
 // Componentes conexas
 void componentes_conexas(Grafo *g, const char *saida);
 
+GrafoP* cria_grafo_p(int n);
+void adiciona_aresta_p(GrafoP *g, int u, int v, float peso);
+GrafoP* le_grafo_pesos(const char *filename);
+void libera_grafo_p(GrafoP *g);
+
+// Dijkstra (vetor e heap)
+void dijkstra_vetor(GrafoP *g, int origem, float *dist, int *pai);
+void dijkstra_heap(GrafoP *g, int origem, float *dist, int *pai);
+
+// Auxiliares
+void imprime_caminho_p(int *pai, int origem, int destino);
+void estudo_caso_p(GrafoP *g, int origem, int *alvos, int k);
+
+void estudo_caso_p(GrafoP *g, int origem, int *alvos, int k);
+
+
 #endif
