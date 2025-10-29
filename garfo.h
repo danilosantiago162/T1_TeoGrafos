@@ -50,5 +50,18 @@ void estudo_caso_p(GrafoP *g, int origem, int *alvos, int k);
 
 void estudo_caso_p(GrafoP *g, int origem, int *alvos, int k);
 
+typedef struct {
+    char **nomes;
+    int n;
+} NomeMap;
+
+NomeMap* le_mapa_nomes(const char *filename);
+int indice_por_nome(NomeMap *map, const char *nome);
+void libera_mapa_nomes(NomeMap *map);
+
+void estudo_caso_pesquisadores(const char *arquivo_grafo, const char *arquivo_nomes,
+                               const char *origem_nome, const char **destinos, int qtd_destinos);
+
 
 #endif
+
