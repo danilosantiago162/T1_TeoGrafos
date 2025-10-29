@@ -376,6 +376,192 @@ void libera_grafo(Grafo* g) {
     }
     free(g->grau);
     free(g);
+}
+GrafoP* cria_grafo_p(int n) {
+    GrafoP *g = (GrafoP*) malloc(sizeof(GrafoP));
+    g->n = n;
+    g->m = 0;
+    g->adj = (NoP**) calloc(n, sizeof(NoP*));
+    return g;
+}
 
+void adiciona_aresta_p(GrafoP *g, int u, int v, float peso) {
+    NoP *novo = (NoP*) malloc(sizeof(NoP));
+    novo->v = v;
+    novo->peso = peso;
+    novo->prox = g->adj[u];
+    g->adj[u] = novo;
+
+    NoP *novo2 = (NoP*) malloc(sizeof(NoP)); // não direcionado
+    novo2->v = u;
+    novo2->peso = peso;
+    novo2->prox = g->adj[v];
+    g->adj[v] = novo2;
+
+    g->m++;
+}
+
+GrafoP* le_grafo_pesos(const char *filename) {
+    FILE *f = fopen(filename, "r");
+    if (!f) { perror("Erro ao abrir arquivo"); exit(1); }
+
+    int n;
+    fscanf(f, "%d", &n); // lê número de vértices
+    GrafoP *g = cria_grafo_p(n);
+
+    int u, v;
+    float w;
+    while (fscanf(f, "%d %d %f", &u, &v, &w) == 3) {
+        adiciona_aresta_p(g, u-1, v-1, w);
+    }
+
+    fclose(f);
+    return g;
+}
+
+void libera_grafo_p(GrafoP *g) {
+    for (int i = 0; i < g->n; i++) {
+        NoP *atual = g->adj[i];
+        while (atual) {
+            NoP *tmp = atual;
+            atual = atual->prox;
+            free(tmp);
+        }
+    }
+    free(g->adj);
+    free(g);
+}
+
+// ---------- Dijkstra (versão vetor) ----------
+void dijkstra_vetor(GrafoP *g, int origem, float *dist, int *pai) {
+    int n = g->n;
+    int *visitado = calloc(n, sizeof(int));
+    for (int i = 0; i < n; i++) {
+        dist[i] = FLT_MAX;
+        pai[i] = -1;
+    }
+    dist[origem] = 0;
+
+    for (int c = 0; c < n; c++) {
+        int u = -1;
+        float min = FLT_MAX;
+        for (int i = 0; i < n; i++)
+            if (!visitado[i] && dist[i] < min) {
+                min = dist[i];
+                u = i;
+            }
+
+        if (u == -1) break;
+        visitado[u] = 1;
+
+        for (NoP *p = g->adj[u]; p; p = p->prox) {
+            int v = p->v;
+            float w = p->peso;
+            if (dist[u] + w < dist[v]) {
+                dist[v] = dist[u] + w;
+                pai[v] = u;
+            }
+        }
+    }
+
+    free(visitado);
+}
+
+// ---------- Estruturas auxiliares para heap ----------
+typedef struct {
+    int v;
+    float dist;
+} Par;
+
+typedef struct {
+    Par *vet;
+    int tamanho;
+} HeapMin;
+
+void troca_p(Par *a, Par *b) {
+    Par tmp = *a; *a = *b; *b = tmp;
+}
+
+void sobe_p(HeapMin *h, int i) {
+    while (i > 0) {
+        int p = (i - 1) / 2;
+        if (h->vet[i].dist >= h->vet[p].dist) break;
+        troca_p(&h->vet[i], &h->vet[p]);
+        i = p;
+    }
+}
+
+void desce_p(HeapMin *h, int i) {
+    int esq, dir, menor;
+    while (1) {
+        esq = 2*i + 1;
+        dir = 2*i + 2;
+        menor = i;
+        if (esq < h->tamanho && h->vet[esq].dist < h->vet[menor].dist) menor = esq;
+        if (dir < h->tamanho && h->vet[dir].dist < h->vet[menor].dist) menor = dir;
+        if (menor == i) break;
+        troca_p(&h->vet[i], &h->vet[menor]);
+        i = menor;
+    }
+}
+
+void inserir_heap_p(HeapMin *h, int v, float dist) {
+    h->vet[h->tamanho].v = v;
+    h->vet[h->tamanho].dist = dist;
+    sobe_p(h, h->tamanho++);
+}
+
+Par extrair_min_p(HeapMin *h) {
+    Par raiz = h->vet[0];
+    h->vet[0] = h->vet[--h->tamanho];
+    desce_p(h, 0);
+    return raiz;
+}
+
+// ---------- Dijkstra (versão heap) ----------
+void dijkstra_heap(GrafoP *g, int origem, float *dist, int *pai) {
+    int n = g->n;
+    for (int i = 0; i < n; i++) {
+        dist[i] = FLT_MAX;
+        pai[i] = -1;
+    }
+    dist[origem] = 0;
+
+    HeapMin h;
+    h.vet = malloc(n * n * sizeof(Par));
+    h.tamanho = 0;
+
+    inserir_heap_p(&h, origem, 0.0);
+
+    while (h.tamanho > 0) {
+        Par atual = extrair_min_p(&h);
+        int u = atual.v;
+        float d = atual.dist;
+        if (d > dist[u]) continue;
+
+        for (NoP *p = g->adj[u]; p; p = p->prox) {
+            int v = p->v;
+            float w = p->peso;
+            if (dist[u] + w < dist[v]) {
+                dist[v] = dist[u] + w;
+                pai[v] = u;
+                inserir_heap_p(&h, v, dist[v]);
+            }
+        }
+    }
+
+    free(h.vet);
+}
+
+// ---------- Funções auxiliares ----------
+void imprime_caminho_p(int *pai, int origem, int destino) {
+    if (origem == destino)
+        printf("%d", origem + 1);
+    else if (pai[destino] == -1)
+        printf("Sem caminho");
+    else {
+        imprime_caminho_p(pai, origem, pai[destino]);
+        printf(" -> %d", destino + 1);
+    }
 }
 
