@@ -564,4 +564,97 @@ void imprime_caminho_p(int *pai, int origem, int destino) {
         printf(" -> %d", destino + 1);
     }
 }
+NomeMap* le_mapa_nomes(const char *filename) {
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        perror("Erro ao abrir arquivo de nomes");
+        exit(1);
+    }
+
+    NomeMap *map = malloc(sizeof(NomeMap));
+    map->nomes = NULL;
+    map->n = 0;
+
+    char linha[512];
+    while (fgets(linha, sizeof(linha), f)) {
+        // Remove \r e \n
+        linha[strcspn(linha, "\r\n")] = '\0';
+
+        // Divide a linha em duas partes: id e nome
+        char *token = strtok(linha, ",");
+        if (!token) continue;
+
+        int id = atoi(token);
+        char *nome = strtok(NULL, ",");
+        if (!nome) continue;
+
+        // Ajusta o tamanho do vetor
+        if (id > map->n) {
+            map->nomes = realloc(map->nomes, id * sizeof(char*));
+            for (int i = map->n; i < id; i++)
+                map->nomes[i] = NULL;
+            map->n = id;
+        }
+
+        map->nomes[id - 1] = strdup(nome);
+    }
+
+    fclose(f);
+    return map;
+}
+
+// ---------- Busca índice pelo nome ----------
+int indice_por_nome(NomeMap *map, const char *nome) {
+    for (int i = 0; i < map->n; i++)
+        if (map->nomes[i] && strcmp(map->nomes[i], nome) == 0)
+            return i;
+    return -1;
+}
+
+// ---------- Liberação do mapa ----------
+void libera_mapa_nomes(NomeMap *map) {
+    for (int i = 0; i < map->n; i++)
+        free(map->nomes[i]);
+    free(map->nomes);
+    free(map);
+}
+
+// ---------- Estudo de caso com nomes ----------
+void estudo_caso_pesquisadores(const char *arquivo_grafo, const char *arquivo_nomes,
+                               const char *origem_nome, const char **destinos, int qtd_destinos)
+{
+    GrafoP *g = le_grafo_pesos(arquivo_grafo);
+    NomeMap *map = le_mapa_nomes(arquivo_nomes);
+
+    int origem = indice_por_nome(map, origem_nome);
+    if (origem == -1) {
+        printf("Pesquisador '%s' não encontrado!\n", origem_nome);
+        libera_mapa_nomes(map);
+        libera_grafo_p(g);
+        return;
+    }
+
+    float *dist = malloc(g->n * sizeof(float));
+    int *pai = malloc(g->n * sizeof(int));
+
+    printf("\n=== Dijkstra (heap) a partir de '%s' ===\n", origem_nome);
+    dijkstra_heap(g, origem, dist, pai);
+
+    for (int i = 0; i < qtd_destinos; i++) {
+        int destino = indice_por_nome(map, destinos[i]);
+        if (destino == -1) {
+            printf("Pesquisador '%s' não encontrado!\n", destinos[i]);
+            continue;
+        }
+        printf("\nDistância '%s' -> '%s' = %.6f\n", origem_nome, destinos[i], dist[destino]);
+        printf("Caminho: ");
+        imprime_caminho_p(pai, origem, destino);
+        printf("\n");
+    }
+
+    free(dist);
+    free(pai);
+    libera_mapa_nomes(map);
+    libera_grafo_p(g);
+}
 
