@@ -1,47 +1,69 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <math.h>
 #include "garfo.h"
 
-//teste
+// imprime caminho usando pai[] gerado por Bellman–Ford reverso
+void imprime_caminho_bf(int *pai, int destino, int atual);
 
 int main() {
-    // Lê o grafo ponderado do arquivo
-    GrafoP *g = le_grafo_pesos("grafo_W_1.txt");
 
-    // Vetores auxiliares
-    float dist[g->n];
-    int pai[g->n];
+    // ==========================================================
+    // 1. Carregar grafo
+    // ==========================================================
+    Grafo *g = le_grafo("grafo_W_2.txt",1,1);
+    if (!g) {
+        printf("Erro ao carregar grafo.\n");
+        return 1;
+    }
 
-    // Executa Dijkstra a partir do vértice 10
-    dijkstra_vetor(g, 9, dist, pai);  // vértice 10 → índice 9 (base 0)
+    int destino = 100;  // vértice t (base 1)
 
-    // Exibe o resultado para 20 e 30
-    printf("Distância mínima de 10 para 20 = %.3f\n", dist[19]);
-    printf("Caminho 10 -> 20: ");
-    imprime_caminho_p(pai, 9, 19);
-    printf("\n\n");
+    // ==========================================================
+    // 2. Medir tempo do Bellman–Ford
+    // ==========================================================
+    clock_t t0 = clock();
+    ResultadoBF R = bellman_ford(g, destino);
+    clock_t t1 = clock();
 
-    printf("Distância mínima de 10 para 30 = %.3f\n", dist[29]);
-    printf("Caminho 10 -> 30: ");
-    imprime_caminho_p(pai, 9, 29);
-    printf("\n");
+    double tempo = (double)(t1 - t0) / CLOCKS_PER_SEC;
 
-    printf("Distância mínima de 10 para 40 = %.3f\n", dist[29]);
-    printf("Caminho 10 -> 40: ");
-    imprime_caminho_p(pai, 9, 39);
-    printf("\n");
+    printf("\nTempo de execução do Bellman–Ford: %.6f segundos\n\n", tempo);
 
-    printf("Distância mínima de 10 para 50 = %.3f\n", dist[9]);
-    printf("Caminho 10 -> 50: ");
-    imprime_caminho_p(pai, 9, 49);
-    printf("\n");
+    // ==========================================================
+    // 3. Detectar ciclo negativo
+    // ==========================================================
+    if (R.negativo)
+        printf("ATENÇÃO: Ciclo negativo detectado!\n\n");
+    else
+        printf("Nenhum ciclo negativo encontrado.\n\n");
 
-    printf("Distância mínima de 10 para 60 = %.3f\n", dist[59]);
-    printf("Caminho 10 -> 60: ");
-    imprime_caminho_p(pai, 9, 59);
-    printf("\n");
+    // ==========================================================
+    // 4. Consultar distâncias 10, 20, 30 → 100
+    // ==========================================================
+    int consultas[3] = {10, 20, 30};
 
-    // Libera a memória
-    libera_grafo_p(g);
+    for (int i = 0; i < 3; i++) {
+        int u = consultas[i] - 1;   // base 0
+        float d = R.dist[u];
+
+        printf("Distância %d → %d = ", consultas[i], destino);
+        if (d == INFINITY) printf("infinito (sem caminho)\n");
+        else printf("%.3f\n", d);
+
+        printf("Caminho: ");
+        imprime_caminho_bf(R.pai, destino - 1, u);
+        printf("\n\n");
+    }
+
+    // ==========================================================
+    // 5. Liberar memória
+    // ==========================================================
+    free(R.dist);
+    free(R.pai);
+    libera_grafo(g);
 
     return 0;
-    }
+}
+
