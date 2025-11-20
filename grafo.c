@@ -2,69 +2,107 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <float.h>
+#include <time.h>
 #include "garfo.h"
 
-//teste
+/* ---------------------------
+   Funções auxiliares internas
+   --------------------------- */
 
-// ---------- Criação ----------
-Grafo* cria_grafo(int n, int representacao) {
-    Grafo *g = malloc(sizeof(Grafo));   
-    if (!g) return NULL;
+/* verifica existência de aresta u->v de forma segura */
+static int tem_aresta(Grafo *g, int u, int v) {
+    if (!g) return 0;
+    if (u < 0 || v < 0 || u >= g->n || v >= g->n) return 0;
+
+    if (g->representacao == 0) {
+        if (g->ponderado) {
+            if (!g->matriz_p || !g->matriz_p[u]) return 0;
+            return (g->matriz_p[u][v] != 0.0f);
+        } else {
+            if (!g->matriz || !g->matriz[u]) return 0;
+            return (g->matriz[u][v] != 0);
+        }
+    } else if (g->representacao == 1) {
+        if (!g->lista || !g->lista[u]) return 0;
+        for (No *p = g->lista[u]; p; p = p->prox) {
+            if (p->v == v) return (g->ponderado ? (p->peso != 0.0f) : 1);
+        }
+        return 0;
+    } else { // adj vetor
+        if (!g->adjVet || !g->adjVet[u]) return 0;
+        for (int i = 0; i < g->grau[u]; i++) if (g->adjVet[u][i] == v) return 1;
+        return 0;
+    }
+}
+
+/* ---------------------------
+   Criação e liberação
+   --------------------------- */
+
+Grafo* cria_grafo(int n, int representacao, int direcionado, int ponderado) {
+    Grafo *g = (Grafo*) malloc(sizeof(Grafo));
 
     g->n = n;
     g->m = 0;
     g->representacao = representacao;
-    g->grau = calloc(n, sizeof(int));
+    g->direcionado = direcionado;
+    g->ponderado = ponderado;
 
-    if (representacao == 0) { // matriz
-        g->matriz = malloc(n * sizeof(int*));
-        for (int i = 0; i < n; i++) {
-            g->matriz[i] = calloc(n, sizeof(int));
+    g->grau = (int*) calloc(n, sizeof(int));
+
+    // ================================
+    // MATRIZ NÃO PONDERADA
+    // ================================
+    g->matriz = NULL;
+    g->matriz_p = NULL;
+
+    if (representacao == 0) {
+        if (!ponderado) {
+            g->matriz = (int**) malloc(n * sizeof(int*));
+            for (int i = 0; i < n; i++) {
+                g->matriz[i] = (int*) calloc(n, sizeof(int));
+            }
+        } 
+        else {
+            g->matriz_p = (float**) malloc(n * sizeof(float*));
+            for (int i = 0; i < n; i++) {
+                g->matriz_p[i] = (float*) calloc(n, sizeof(float));
+            }
         }
-        g->lista = NULL;
-    } else { // lista
-        g->lista = malloc(n * sizeof(int*));
-        for (int i = 0; i < n; i++) {
+    }
+
+    // ================================
+    // LISTA DE ADJACÊNCIA
+    // ================================
+    g->lista = NULL;
+
+    if (representacao == 1) {
+        g->lista = (No**) malloc(n * sizeof(No*));
+        for (int i = 0; i < n; i++)
             g->lista[i] = NULL;
-        }
-        g->matriz = NULL;
     }
-    return g;
-}
 
-// ---------- Leitura ----------
-Grafo* le_grafo_arquivo(const char *filename, int representacao) {
-    FILE *f = fopen(filename, "r");
-    if (!f) { perror("Erro ao abrir arquivo"); exit(1); }
+    // ================================
+    // VETOR DE ADJACÊNCIA + PESOS
+    // ================================
+    g->adjVet = NULL;
+    g->pesoVet = NULL;
 
-    int n, u, v;
-    fscanf(f, "%d", &n);
-    Grafo *g = cria_grafo(n, representacao);
+    if (representacao == 2) {
+        g->adjVet = (int**) malloc(n * sizeof(int*));
+        g->pesoVet = (float**) malloc(n * sizeof(float*));
 
-    while (fscanf(f, "%d %d", &u, &v) == 2) {
-        u--; v--; // índice base 0
-        g->m++;
-        g->grau[u]++; g->grau[v]++;
-
-        if (representacao == 0) {
-            g->matriz[u][v] = g->matriz[v][u] = 1;
-        } else {
-            // insere em lista de adjacência (simples)
-            int *tmp = realloc(g->lista[u], (g->grau[u]) * sizeof(int));
-            g->lista[u] = tmp;
-            g->lista[u][g->grau[u]-1] = v;
-
-            tmp = realloc(g->lista[v], (g->grau[v]) * sizeof(int));
-            g->lista[v] = tmp;
-            g->lista[v][g->grau[v]-1] = u;
+        for (int i = 0; i < n; i++) {
+            g->adjVet[i] = NULL;
+            g->pesoVet[i] = NULL;
         }
     }
 
-    fclose(f);
     return g;
 }
 
-// ---------- Funções de grau ----------
+
 int grau_min(Grafo *g) {
     int min = INT_MAX;
     for (int i = 0; i < g->n; i++)
@@ -87,7 +125,7 @@ double grau_medio(Grafo *g) {
 
 double grau_mediana(Grafo *g) {
     int *copia = malloc(g->n * sizeof(int));
-    if (!copia) return 0.0; 
+    if (!copia) return 0.0; // ou tratar erro apropriadamente
     memcpy(copia, g->grau, g->n * sizeof(int));
     for (int i = 0; i < g->n-1; i++)
         for (int j = i+1; j < g->n; j++)
@@ -114,42 +152,269 @@ void salva_informacoes(const char *filename, Grafo *g) {
 
     fclose(f);
 }
-// ---------- BFS ----------
-void bfs(Grafo *g, int inicio, const char *saida) {
-    inicio--; // converter para índice base 0
-    printf("Executando BFS a partir do vértice %d...\n", inicio);
 
-    int *visitado = (int*) calloc(g->n, sizeof(int));
-    int *pai = (int*) malloc(g->n * sizeof(int));
-    int *nivel = (int*) malloc(g->n * sizeof(int));
-    int *fila = (int*) malloc(g->n * sizeof(int));
-    int frente = 0, tras = 0;
+void libera_grafo(Grafo *g) {
+    if (!g) return;
 
-    for (int i = 0; i < g->n; i++) {
-        pai[i] = -1;     // -1 = sem pai
-        nivel[i] = -1;   // -1 = não visitado
+    // -------------------------------------------------------
+    // MATRIZ NÃO PONDERADA
+    // -------------------------------------------------------
+    if (g->representacao == 0 && g->matriz != NULL) {
+        for (int i = 0; i < g->n; i++)
+            free(g->matriz[i]);
+        free(g->matriz);
+        g->matriz = NULL;
     }
 
-    // inicializa com o vértice inicial
+    // -------------------------------------------------------
+    // MATRIZ PONDERADA
+    // -------------------------------------------------------
+    if (g->representacao == 0 && g->matriz_p != NULL) {
+        for (int i = 0; i < g->n; i++)
+            free(g->matriz_p[i]);
+        free(g->matriz_p);
+        g->matriz_p = NULL;
+    }
+
+    // -------------------------------------------------------
+    // LISTA DE ADJACÊNCIA
+    // -------------------------------------------------------
+    if (g->representacao == 1 && g->lista != NULL) {
+        for (int i = 0; i < g->n; i++) {
+            No *p = g->lista[i];
+            while (p != NULL) {
+                No *tmp = p;
+                p = p->prox;
+                free(tmp);
+            }
+        }
+        free(g->lista);
+        g->lista = NULL;
+    }
+
+    // -------------------------------------------------------
+    // VETOR DE ADJACÊNCIA + PESOS
+    // -------------------------------------------------------
+    if (g->representacao == 2 && g->adjVet != NULL) {
+        for (int i = 0; i < g->n; i++) {
+            free(g->adjVet[i]);
+            free(g->pesoVet[i]);
+        }
+        free(g->adjVet);
+        free(g->pesoVet);
+
+        g->adjVet  = NULL;
+        g->pesoVet = NULL;
+    }
+
+    // -------------------------------------------------------
+    // GRAU
+    // -------------------------------------------------------
+    if (g->grau != NULL)
+        free(g->grau);
+
+    // -------------------------------------------------------
+    // LIBERA A STRUCT
+    // -------------------------------------------------------
+    free(g);
+}
+
+/* ---------------------------
+   Inserção unificada de aresta
+   --------------------------- */
+
+void adiciona_aresta(Grafo *g, int u, int v, float peso) {
+
+    // -------------------------------------------------------------
+    //   MATRIZ DE ADJACÊNCIA
+    // -------------------------------------------------------------
+    if (g->representacao == 0) {
+        if (g->ponderado == 0) {
+            g->matriz[u][v] = 1;
+            if (!g->direcionado)
+                g->matriz[v][u] = 1;
+        } 
+        else {
+            g->matriz_p[u][v] = peso;
+            if (!g->direcionado)
+                g->matriz_p[v][u] = peso;
+        }
+
+        g->grau[u]++;
+        if (!g->direcionado) g->grau[v]++;
+        g->m++;
+        return;
+    }
+
+    // -------------------------------------------------------------
+    //   LISTA DE ADJACÊNCIA
+    // -------------------------------------------------------------
+    else if (g->representacao == 1) {
+
+        No *novo = (No*) malloc(sizeof(No));
+        novo->v = v;
+        novo->peso = g->ponderado ? peso : 1.0;
+        novo->prox = g->lista[u];
+        g->lista[u] = novo;
+
+        g->grau[u]++;
+
+        if (!g->direcionado) {
+            No *novo2 = (No*) malloc(sizeof(No));
+            novo2->v = u;
+            novo2->peso = g->ponderado ? peso : 1.0;
+            novo2->prox = g->lista[v];
+            g->lista[v] = novo2;
+            g->grau[v]++;
+        }
+
+        g->m++;
+        return;
+    }
+
+    // -------------------------------------------------------------
+    //   VETOR DE ADJACÊNCIA + PESOS
+    // -------------------------------------------------------------
+    else if (g->representacao == 2) {
+
+        int grau_u = g->grau[u] + 1;
+
+        g->adjVet[u] = (int*)  realloc(g->adjVet[u],  grau_u * sizeof(int));
+        g->pesoVet[u] = (float*) realloc(g->pesoVet[u], grau_u * sizeof(float));
+
+        g->adjVet[u][grau_u - 1]  = v;
+        g->pesoVet[u][grau_u - 1] = g->ponderado ? peso : 1.0;
+
+        g->grau[u]++;
+
+        if (!g->direcionado) {
+            int grau_v = g->grau[v] + 1;
+
+            g->adjVet[v] = (int*) realloc(g->adjVet[v], grau_v * sizeof(int));
+            g->pesoVet[v] = (float*) realloc(g->pesoVet[v], grau_v * sizeof(float));
+
+            g->adjVet[v][grau_v - 1]  = u;
+            g->pesoVet[v][grau_v - 1] = g->ponderado ? peso : 1.0;
+
+            g->grau[v]++;
+        }
+
+        g->m++;
+        return;
+    }
+}
+
+
+/* ---------------------------
+   Leitura de arquivo (detecção automática de pesos)
+   Formato:
+     primeira linha: n
+     linhas seguintes:
+       u v            (não ponderado)
+       u v w          (ponderado)
+   --------------------------- */
+
+Grafo* le_grafo(const char *filename, int representacao, int direcionado) {
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        perror("Erro ao abrir arquivo");
+        return NULL;
+    }
+
+    int n;
+    fscanf(f, "%d", &n);
+
+    int u, v;
+    float w;
+
+    // --------------------------------------------------------------------
+    // DETECTAR AUTOMATICAMENTE SE O GRAFO É PONDERADO
+    // --------------------------------------------------------------------
+    int ponderado = 0;
+    long pos = ftell(f);
+
+    if (fscanf(f, "%d %d %f", &u, &v, &w) == 3)
+        ponderado = 1;
+
+    fseek(f, pos, SEEK_SET);  // volta para a posição inicial
+
+    // --------------------------------------------------------------------
+    // CRIA GRAFO
+    // --------------------------------------------------------------------
+    Grafo *g = cria_grafo(n, representacao, direcionado, ponderado);
+
+    // --------------------------------------------------------------------
+    // LEITURA DAS ARESTAS
+    // --------------------------------------------------------------------
+    if (!ponderado) {
+        while (fscanf(f, "%d %d", &u, &v) == 2) {
+            adiciona_aresta(g, u - 1, v - 1, 1.0);
+        }
+    }
+    else {
+        while (fscanf(f, "%d %d %f", &u, &v, &w) == 3) {
+            adiciona_aresta(g, u - 1, v - 1, w);
+        }
+    }
+
+    fclose(f);
+    return g;
+}
+
+
+/* ---------------------------
+   BFS: já suporta matriz/lista/vetor
+   arquivo de saída: saida (nome) - se NULL imprime só no terminal
+   --------------------------- */
+
+void bfs(Grafo *g, int inicio, const char *saida) {
+    printf("BFS REALMENTE ENTROU NA FUNÇÃO!\n");
+
+    if (!g) return;
+    inicio--; /* base 0 */
+    if (inicio < 0 || inicio >= g->n) { fprintf(stderr,"bfs: inicio fora do intervalo\n"); return; }
+
+    int *visitado = calloc(g->n, sizeof(int));
+    int *pai = malloc(g->n * sizeof(int));
+    int *nivel = malloc(g->n * sizeof(int));
+    int *fila = malloc(g->n * sizeof(int));
+    if (!visitado || !pai || !nivel || !fila) { perror("malloc"); exit(1); }
+
+    for (int i = 0; i < g->n; i++) { pai[i] = -1; nivel[i] = -1; }
+
+    int frente = 0, tras = 0;
     visitado[inicio] = 1;
     nivel[inicio] = 0;
     fila[tras++] = inicio;
 
     while (frente < tras) {
-        int u = fila[frente++]; // desenfileira
+        int u = fila[frente++];
 
-        if (g->representacao == 0) { // matriz
+        if (g->representacao == 0) {
+            /* matriz (ponderada ou não): checagem baseada em tem_aresta */
             for (int v = 0; v < g->n; v++) {
-                if (g->matriz[u][v] && !visitado[v]) {
+                if (tem_aresta(g, u, v) && !visitado[v]) {
                     visitado[v] = 1;
                     pai[v] = u;
                     nivel[v] = nivel[u] + 1;
                     fila[tras++] = v;
                 }
             }
-        } else { // lista
+        } else if (g->representacao == 1) {
+            /* lista encadeada */
+            for (No *p = g->lista[u]; p; p = p->prox) {
+                int v = p->v;
+                if (!visitado[v]) {
+                    visitado[v] = 1;
+                    pai[v] = u;
+                    nivel[v] = nivel[u] + 1;
+                    fila[tras++] = v;
+                }
+            }
+        } else {
+            /* vetor de adjacência */
             for (int i = 0; i < g->grau[u]; i++) {
-                int v = g->lista[u][i];
+                int v = g->adjVet[u][i];
                 if (!visitado[v]) {
                     visitado[v] = 1;
                     pai[v] = u;
@@ -160,86 +425,95 @@ void bfs(Grafo *g, int inicio, const char *saida) {
         }
     }
 
-    // salva a árvore de busca no arquivo
-    FILE *f = fopen(saida, "w");
-    if (!f) { perror("Erro ao salvar BFS"); return; }
+    FILE *f = NULL;
+    if (saida) {
+        f = fopen(saida, "w");
+        if (!f) { perror("Erro ao abrir saida BFS"); f = NULL; }
+    }
 
-    fprintf(f, "BFS a partir do vertice %d\n", inicio+1);
-    printf("BFS a partir do vertice %d\n", inicio+1);  
+    if (f) fprintf(f, "BFS a partir do vertice %d\n\n", inicio + 1);
+    printf("BFS a partir do vertice %d\n", inicio + 1);
 
     for (int i = 0; i < g->n; i++) {
-        fprintf(f, "Vertice %d: pai = %d, nivel = %d\n",
-                i+1,
-                (pai[i] == -1 ? -1 : pai[i]+1), // +1 pra voltar base 1
-                nivel[i]);
+        if (f) fprintf(f, "Vertice %d: pai = %d, nivel = %d\n", i+1, (pai[i]==-1? -1 : pai[i]+1), nivel[i]);
+        printf("Vertice %d: pai = %d, nivel = %d\n", i+1, (pai[i]==-1? -1 : pai[i]+1), nivel[i]);
     }
 
-    fclose(f);
+    if (f) fclose(f);
 
-    free(visitado);
-    free(pai);
-    free(nivel);
-    free(fila);
+    free(visitado); free(pai); free(nivel); free(fila);
 }
 
-// ---------- DFS ----------
-void dfs_visit(Grafo *g, int u, int *visitado, int *pai, int *nivel, int nivel_atual, FILE *f) {
-    visitado[u] = 1;
-    nivel[u] = nivel_atual;
-    
-    fprintf(f, "Vertice %d: pai = %d, nivel = %d\n",
-            u+1,
-            (pai[u] == -1 ? -1 : pai[u]+1),
-            nivel[u]);
+/* ---------------------------
+   DFS iterativa: suporta matriz/lista/vetor
+   --------------------------- */
 
-    printf("Vertice %d: pai = %d, nivel = %d\n",
-            u+1,
-            (pai[u] == -1 ? -1 : pai[u]+1),
-            nivel[u]);
+void dfs_iterativa(Grafo *g, int inicio, const char *saida) {
+    if (!g) return;
+    inicio--; if (inicio < 0 || inicio >= g->n) { fprintf(stderr,"dfs: inicio fora do intervalo\n"); return; }
 
-    if (g->representacao == 0) { // matriz
-        for (int v = 0; v < g->n; v++) {
-            if (g->matriz[u][v] && !visitado[v]) {
-                pai[v] = u;
-                dfs_visit(g, v, visitado, pai, nivel, nivel_atual + 1, f);
+    int *visitado = calloc(g->n, sizeof(int));
+    int *pai = malloc(g->n * sizeof(int));
+    int *nivel = malloc(g->n * sizeof(int));
+    int *stack = malloc(g->n * sizeof(int));
+    if (!visitado || !pai || !nivel || !stack) { perror("malloc"); exit(1); }
+
+    for (int i = 0; i < g->n; i++) { pai[i] = -1; nivel[i] = -1; }
+
+    FILE *f = NULL;
+    if (saida) {
+        f = fopen(saida, "w");
+        if (!f) { perror("Erro ao abrir saida DFS"); f = NULL; }
+    }
+    if (f) fprintf(f, "DFS iterativa a partir do vertice %d\n", inicio + 1);
+    printf("DFS iterativa a partir do vertice %d\n", inicio + 1);
+
+    int top = -1;
+    stack[++top] = inicio;
+    nivel[inicio] = 0;
+
+    while (top >= 0) {
+        int u = stack[top--];
+        if (visitado[u]) continue;
+        visitado[u] = 1;
+
+        if (f) fprintf(f, "Vertice %d: pai = %d, nivel = %d\n", u+1, (pai[u]==-1? -1 : pai[u]+1), nivel[u]);
+        printf("Vertice %d: pai = %d, nivel = %d\n", u+1, (pai[u]==-1? -1 : pai[u]+1), nivel[u]);
+
+        if (g->representacao == 0) {
+            for (int v = 0; v < g->n; v++) {
+                if (tem_aresta(g, u, v) && !visitado[v]) {
+                    pai[v] = u;
+                    nivel[v] = nivel[u] + 1;
+                    stack[++top] = v;
+                }
             }
-        }
-    } else { // lista
-        for (int i = 0; i < g->grau[u]; i++) {
-            int v = g->lista[u][i];
-            if (!visitado[v]) {
-                pai[v] = u;
-                dfs_visit(g, v, visitado, pai, nivel, nivel_atual + 1, f);
+        } else if (g->representacao == 1) {
+            for (No *p = g->lista[u]; p; p = p->prox) {
+                int v = p->v;
+                if (!visitado[v]) {
+                    pai[v] = u;
+                    nivel[v] = nivel[u] + 1;
+                    stack[++top] = v;
+                }
+            }
+        } else {
+            for (int i = 0; i < g->grau[u]; i++) {
+                int v = g->adjVet[u][i];
+                if (!visitado[v]) {
+                    pai[v] = u;
+                    nivel[v] = nivel[u] + 1;
+                    stack[++top] = v;
+                }
             }
         }
     }
-}
 
-void dfs(Grafo *g, int inicio, const char *saida) {
-    inicio--; // converter para índice base 0
+    if (f) fprintf(f, "DFS concluída.\n");
+    printf("DFS concluída.\n");
+    if (f) fclose(f);
 
-    int *visitado = (int*) calloc(g->n, sizeof(int));
-    int *pai = (int*) malloc(g->n * sizeof(int));
-    int *nivel = (int*) malloc(g->n * sizeof(int));
-
-    for (int i = 0; i < g->n; i++) {
-        pai[i] = -1;
-        nivel[i] = -1;
-    }
-
-    FILE *f = fopen(saida, "w");
-    if (!f) { perror("Erro ao salvar DFS"); return; }
-
-    fprintf(f, "DFS a partir do vertice %d\n", inicio+1);
-    printf("DFS a partir do vertice %d\n", inicio+1);
-
-    dfs_visit(g, inicio, visitado, pai, nivel, 0, f);
-
-    fclose(f);
-
-    free(visitado);
-    free(pai);
-    free(nivel);
+    free(visitado); free(pai); free(nivel); free(stack);
 }
 
 int* bfs_distancias(Grafo *g, int inicio) {
@@ -263,8 +537,8 @@ int* bfs_distancias(Grafo *g, int inicio) {
                 }
             }
         } else { // lista
-            for (int i = 0; i < g->grau[u]; i++) {
-                int v = g->lista[u][i];
+            for (No *p = g->lista[u]; p != NULL; p = p->prox) {
+                int v = p->v;
                 if (dist[v] == -1) {
                     dist[v] = dist[u] + 1;
                     fila[tras++] = v;
@@ -274,86 +548,112 @@ int* bfs_distancias(Grafo *g, int inicio) {
     }
 
     free(fila);
-    return dist; 
+    return dist; // vetor com as distâncias a partir de inicio
 }
 
 int distancia(Grafo *g, int u, int v) {
-    int *dist = bfs_distancias(g, u);
-    int d = dist[v-1]; // índice base 0
-    free(dist);
-    return d;
+    int *d = bfs_distancias(g, u);
+    if (!d) return -1;
+    int res = d[v-1];
+    free(d);
+    return res;
 }
+
+
+int dfs_visit_cc(Grafo *g, int u, int *visitado) {
+    visitado[u] = 1;
+    int count = 1;
+
+    if (g->representacao == 0) { // Matriz de adjacência
+        for (int v = 0; v < g->n; v++) {
+            if (g->matriz[u][v] && !visitado[v]) {
+                count += dfs_visit_cc(g, v, visitado);
+            }
+        }
+    } else { // Lista de adjacência
+        for (No *p = g->lista[u]; p != NULL; p = p->prox) {
+            int v = p->v;
+            if (!visitado[v]) {
+                count += dfs_visit_cc(g, v, visitado);
+            }
+        }
+    }
+    return count;
+}
+
 void componentes_conexas(Grafo *g, const char *saida) {
     FILE *f = fopen(saida, "w");
     if (!f) {
-        printf("Erro ao abrir arquivo de saída\n");
+        perror("Erro ao salvar componentes conexas");
         return;
     }
 
     int *visitado = (int*) calloc(g->n, sizeof(int));
-    int componente = 0;
+    int num_componentes = 0;
+    int maior_componente = 0;
+    int menor_componente = g->n + 1; // Inicializa com um valor maior que o possível
+
+    fprintf(f, "Componentes Conexas:\n");
+    printf("Componentes Conexas:\n");
 
     for (int i = 0; i < g->n; i++) {
         if (!visitado[i]) {
-            componente++;
-            int qtd = 0;
+            num_componentes++;
+            int tamanho_comp = dfs_visit_cc(g, i, visitado);
 
-            int *fila = (int) malloc(g->n * sizeof(int));
-            int inicio = 0, fim = 0;
+            fprintf(f, "Componente %d: %d vertices\n", num_componentes, tamanho_comp);
+            printf("Componente %d: %d vertices\n", num_componentes, tamanho_comp);
 
-            fila[fim++] = i;
-            visitado[i] = 1;
-
-            while (inicio < fim) {
-                int v = fila[inicio++];
-                qtd++; // conta mais um vértice na componente
-
-                if (g->representacao == 0) { // matriz
-                    for (int j = 0; j < g->n; j++) {
-                        if (g->matriz[v][j] && !visitado[j]) {
-                            fila[fim++] = j;
-                            visitado[j] = 1;
-                        }
-                    }
-                } else { // lista
-                    for (int k = 0; k < g->grau[v]; k++) {
-                        int vizinho = g->lista[v][k];
-                        if (!visitado[vizinho]) {
-                            fila[fim++] = vizinho;
-                            visitado[vizinho] = 1;
-                        }
-                    }
-                }
+            if (tamanho_comp > maior_componente) {
+                maior_componente = tamanho_comp;
             }
-
-            fprintf(f, "Componente %d: %d vértices\n", componente, qtd);
-            free(fila);
+            if (tamanho_comp < menor_componente) {
+                menor_componente = tamanho_comp;
+            }
         }
     }
-
-    free(visitado);
-    fclose(f);
 }
 
 int diametro(Grafo *g) {
     if (g->n == 0) return 0;
 
-    int *dist1 = bfs_distancias(g, 1);
-    int v = 1, max_dist = -1;
+    int *visitado = (int*) calloc(g->n, sizeof(int));
+    int maior_componente_tamanho = 0;
+    int vertice_inicio = -1;
+
+    // Encontra a maior componente conexa
+    for (int i = 0; i < g->n; i++) {
+        if (!visitado[i]) {
+            int tamanho = dfs_visit_cc(g, i, visitado);
+            if (tamanho > maior_componente_tamanho) {
+                maior_componente_tamanho = tamanho;
+                vertice_inicio = i + 1; // base 1 para bfs_distancias
+            }
+        }
+    }
+
+    if (vertice_inicio == -1) {
+        free(visitado);
+        return 0; // nenhum vértice acessível
+    }
+
+    free(visitado);
+
+    // 1ª BFS: a partir de um vértice da maior componente
+    int *dist1 = bfs_distancias(g, vertice_inicio);
+    int v = vertice_inicio, max_dist = -1;
 
     for (int i = 0; i < g->n; i++) {
         if (dist1[i] > max_dist) {
             max_dist = dist1[i];
-            v = i + 1;
+            v = i + 1; // vértice mais distante (base 1)
         }
     }
     free(dist1);
 
-    if (max_dist == -1) {
-        // Grafo desconexo (nenhum vértice acessível)
-        return -1;
-    }
+    if (max_dist == -1) return -1; // grafo desconexo
 
+    // 2ª BFS: a partir do vértice mais distante encontrado
     int *dist2 = bfs_distancias(g, v);
     max_dist = -1;
     for (int i = 0; i < g->n; i++) {
@@ -366,74 +666,8 @@ int diametro(Grafo *g) {
     return max_dist;
 }
 
-void libera_grafo(Grafo* g) {
-    if (g->representacao == 0) {
-        for (int i = 0; i < g->n; i++) free(g->matriz[i]);
-        free(g->matriz);
-    } else {
-        for (int i = 0; i < g->n; i++) free(g->lista[i]);
-        free(g->lista);
-    }
-    free(g->grau);
-    free(g);
-}
-GrafoP* cria_grafo_p(int n) {
-    GrafoP *g = (GrafoP*) malloc(sizeof(GrafoP));
-    g->n = n;
-    g->m = 0;
-    g->adj = (NoP**) calloc(n, sizeof(NoP*));
-    return g;
-}
-
-void adiciona_aresta_p(GrafoP *g, int u, int v, float peso) {
-    NoP *novo = (NoP*) malloc(sizeof(NoP));
-    novo->v = v;
-    novo->peso = peso;
-    novo->prox = g->adj[u];
-    g->adj[u] = novo;
-
-    NoP *novo2 = (NoP*) malloc(sizeof(NoP)); // não direcionado
-    novo2->v = u;
-    novo2->peso = peso;
-    novo2->prox = g->adj[v];
-    g->adj[v] = novo2;
-
-    g->m++;
-}
-
-GrafoP* le_grafo_pesos(const char *filename) {
-    FILE *f = fopen(filename, "r");
-    if (!f) { perror("Erro ao abrir arquivo"); exit(1); }
-
-    int n;
-    fscanf(f, "%d", &n); // lê número de vértices
-    GrafoP *g = cria_grafo_p(n);
-
-    int u, v;
-    float w;
-    while (fscanf(f, "%d %d %f", &u, &v, &w) == 3) {
-        adiciona_aresta_p(g, u-1, v-1, w);
-    }
-
-    fclose(f);
-    return g;
-}
-
-void libera_grafo_p(GrafoP *g) {
-    for (int i = 0; i < g->n; i++) {
-        NoP *atual = g->adj[i];
-        while (atual) {
-            NoP *tmp = atual;
-            atual = atual->prox;
-            free(tmp);
-        }
-    }
-    free(g->adj);
-    free(g);
-}
-
 // ---------- Dijkstra (versão vetor) ----------
-void dijkstra_vetor(GrafoP *g, int origem, float *dist, int *pai) {
+void dijkstra_vetor(Grafo *g, int origem, float *dist, int *pai) {
     int n = g->n;
     int *visitado = calloc(n, sizeof(int));
     for (int i = 0; i < n; i++) {
@@ -454,7 +688,7 @@ void dijkstra_vetor(GrafoP *g, int origem, float *dist, int *pai) {
         if (u == -1) break;
         visitado[u] = 1;
 
-        for (NoP *p = g->adj[u]; p; p = p->prox) {
+        for (No *p = g->lista[u]; p; p = p->prox) {
             int v = p->v;
             float w = p->peso;
             if (dist[u] + w < dist[v]) {
@@ -519,7 +753,7 @@ Par extrair_min_p(HeapMin *h) {
 }
 
 // ---------- Dijkstra (versão heap) ----------
-void dijkstra_heap(GrafoP *g, int origem, float *dist, int *pai) {
+void dijkstra_heap(Grafo *g, int origem, float *dist, int *pai) {
     int n = g->n;
     for (int i = 0; i < n; i++) {
         dist[i] = FLT_MAX;
@@ -539,7 +773,7 @@ void dijkstra_heap(GrafoP *g, int origem, float *dist, int *pai) {
         float d = atual.dist;
         if (d > dist[u]) continue;
 
-        for (NoP *p = g->adj[u]; p; p = p->prox) {
+        for (No *p = g->lista[u]; p; p = p->prox) {
             int v = p->v;
             float w = p->peso;
             if (dist[u] + w < dist[v]) {
@@ -549,112 +783,264 @@ void dijkstra_heap(GrafoP *g, int origem, float *dist, int *pai) {
             }
         }
     }
-
     free(h.vet);
 }
 
+Grafo* inverte_grafo(Grafo *g) {
+    Grafo *inv = cria_grafo(g->n, g->representacao, 1, g->ponderado);
+    // ============================================================
+    // MATRIZ DE ADJACÊNCIA (ponderada ou não)
+    // ============================================================
+    if (g->representacao == 0) {
+        for (int u = 0; u < g->n; u++) {
+            for (int v = 0; v < g->n; v++) {
+
+                if (!g->ponderado) {
+                    if (g->matriz[u][v] != 0)
+                        adiciona_aresta(inv, v, u, 1.0);
+                }
+                else {
+                    if (g->matriz_p[u][v] != 0)
+                        adiciona_aresta(inv, v, u, g->matriz_p[u][v]);
+                }
+            }
+        }
+        return inv;
+    }
+    // ============================================================
+    // LISTA DE ADJACÊNCIA
+    // ============================================================
+    if (g->representacao == 1) {
+
+        for (int u = 0; u < g->n; u++) {
+            for (No *p = g->lista[u]; p != NULL; p = p->prox) {
+                int v = p->v;
+                float w = g->ponderado ? p->peso : 1.0;
+                adiciona_aresta(inv, v, u, w);
+            }
+        }
+        return inv;
+    }
+    // ============================================================
+    // VETOR DE ADJACÊNCIA + PESOS
+    // ============================================================
+    if (g->representacao == 2) {
+        for (int u = 0; u < g->n; u++) {
+
+            for (int i = 0; i < g->grau[u]; i++) {
+                int v = g->adjVet[u][i];
+                float w = g->ponderado ? g->pesoVet[u][i] : 1.0;
+
+                adiciona_aresta(inv, v, u, w);
+            }
+        }
+        return inv;
+    }
+    return inv;
+}
+
 // ---------- Funções auxiliares ----------
-void imprime_caminho_p(int *pai, int origem, int destino) {
+void imprime_caminho(int *pai, int origem, int destino) {
     if (origem == destino)
         printf("%d", origem + 1);
     else if (pai[destino] == -1)
         printf("Sem caminho");
     else {
-        imprime_caminho_p(pai, origem, pai[destino]);
+        imprime_caminho(pai, origem, pai[destino]);
         printf(" -> %d", destino + 1);
     }
 }
-NomeMap* le_mapa_nomes(const char *filename) {
-    FILE *f = fopen(filename, "r");
-    if (!f) {
-        perror("Erro ao abrir arquivo de nomes");
-        exit(1);
+
+// ==========================================================
+//   BELLMAN–FORD
+// ==========================================================
+
+// ---------------------------------------------------------------
+// Gera a lista de arestas INVERTIDAS, igual ao Dijkstra-reverso
+// (se no arquivo existe u -> v, aqui teremos v -> u)
+// ---------------------------------------------------------------
+Aresta *gera_arestas_invertidas(Grafo *g, int *m_out) {
+    int cap = 128;
+    int count = 0;
+    Aresta *E = malloc(cap * sizeof(Aresta));
+
+    if (!E) { perror("malloc"); exit(1); }
+
+    if (g->representacao == 1) {   // LISTA
+        for (int u = 0; u < g->n; u++) {
+            for (No *p = g->lista[u]; p != NULL; p = p->prox) {
+                int v = p->v;
+                float w = g->ponderado ? p->peso : 1.0f;
+
+                if (count >= cap) {
+                    cap *= 2;
+                    E = realloc(E, cap * sizeof(Aresta));
+                }
+                // invertida: v -> u
+                E[count++] = (Aresta){ v, u, w };
+            }
+        }
     }
 
-    NomeMap *map = malloc(sizeof(NomeMap));
-    map->nomes = NULL;
-    map->n = 0;
+    else if (g->representacao == 0) { // MATRIZ
+        if (g->ponderado) {
+            for (int u = 0; u < g->n; u++)
+                for (int v = 0; v < g->n; v++)
+                    if (g->matriz_p[u][v] != 0) {
+                        if (count >= cap) { cap *= 2; E = realloc(E, cap * sizeof(Aresta)); }
+                        E[count++] = (Aresta){ v, u, g->matriz_p[u][v] };
+                    }
+        } else {
+            for (int u = 0; u < g->n; u++)
+                for (int v = 0; v < g->n; v++)
+                    if (g->matriz[u][v] != 0) {
+                        if (count >= cap) { cap *= 2; E = realloc(E, cap * sizeof(Aresta)); }
+                        E[count++] = (Aresta){ v, u, 1.0f };
+                    }
+        }
+    }
 
-    char linha[512];
-    while (fgets(linha, sizeof(linha), f)) {
-        // Remove \r e \n
-        linha[strcspn(linha, "\r\n")] = '\0';
+    else { // VETOR DE ADJACÊNCIA
+        for (int u = 0; u < g->n; u++) {
+            for (int k = 0; k < g->grau[u]; k++) {
+                int v = g->adjVet[u][k];
+                float w = g->ponderado ? g->pesoVet[u][k] : 1.0f;
 
-        // Divide a linha em duas partes: id e nome
-        char *token = strtok(linha, ",");
-        if (!token) continue;
+                if (count >= cap) { cap *= 2; E = realloc(E, cap * sizeof(Aresta)); }
 
-        int id = atoi(token);
-        char *nome = strtok(NULL, ",");
-        if (!nome) continue;
+                // invertida v -> u
+                E[count++] = (Aresta){ v, u, w };
+            }
+        }
+    }
 
-        // Ajusta o tamanho do vetor
-        if (id > map->n) {
-            map->nomes = realloc(map->nomes, id * sizeof(char*));
-            for (int i = map->n; i < id; i++)
-                map->nomes[i] = NULL;
-            map->n = id;
+    *m_out = count;
+    return E;
+}
+
+// ---------------------------------------------------------------
+// B E L L M A N – F O R D  usando arestas invertidas
+// Encontra distâncias DE TODOS para o vértice t.
+// ---------------------------------------------------------------
+#include <math.h>
+ResultadoBF bellman_ford(Grafo *g, int t_orig) {
+    ResultadoBF R = {0};
+
+    int n = g->n;
+    int t = t_orig - 1; // base 0
+
+    float *dist = malloc(n * sizeof(float));
+    int   *pai  = malloc(n * sizeof(int));
+    if (!dist || !pai) { perror("malloc"); exit(1); }
+
+    // inicialização
+    for (int i = 0; i < n; i++) {
+        dist[i] = INFINITY;
+        pai[i] = -1;
+    }
+    dist[t] = 0.0f;
+
+    // gera arestas invertidas
+    int m = 0;
+    Aresta *E = gera_arestas_invertidas(g, &m);
+
+    // relaxações (n-1 vezes)
+    for (int i = 0; i < n - 1; i++) {
+        int mudou = 0;
+
+        for (int k = 0; k < m; k++) {
+            int u = E[k].u;
+            int v = E[k].v;
+            float w = E[k].w;
+
+            if (dist[u] != INFINITY && dist[u] + w < dist[v]) {
+                dist[v] = dist[u] + w;
+                pai[v] = u;
+                mudou = 1;
+            }
         }
 
-        map->nomes[id - 1] = strdup(nome);
+        if (!mudou) break; // otimização 1: early stopping
     }
 
-    fclose(f);
-    return map;
+    // detecção de ciclo negativo
+    int negativo = 0;
+    for (int k = 0; k < m; k++) {
+        int u = E[k].u;
+        int v = E[k].v;
+        float w = E[k].w;
+
+        if (dist[u] != INFINITY && dist[u] + w < dist[v]) {
+            negativo = 1;
+            break;
+        }
+    }
+
+    free(E);
+
+    R.dist = dist;
+    R.pai = pai;
+    R.negativo = negativo;
+    return R;
 }
 
-// ---------- Busca índice pelo nome ----------
-int indice_por_nome(NomeMap *map, const char *nome) {
-    for (int i = 0; i < map->n; i++)
-        if (map->nomes[i] && strcmp(map->nomes[i], nome) == 0)
-            return i;
-    return -1;
-}
-
-// ---------- Liberação do mapa ----------
-void libera_mapa_nomes(NomeMap *map) {
-    for (int i = 0; i < map->n; i++)
-        free(map->nomes[i]);
-    free(map->nomes);
-    free(map);
-}
-
-// ---------- Estudo de caso com nomes ----------
-void estudo_caso_pesquisadores(const char *arquivo_grafo, const char *arquivo_nomes,
-                               const char *origem_nome, const char **destinos, int qtd_destinos)
-{
-    GrafoP *g = le_grafo_pesos(arquivo_grafo);
-    NomeMap *map = le_mapa_nomes(arquivo_nomes);
-
-    int origem = indice_por_nome(map, origem_nome);
-    if (origem == -1) {
-        printf("Pesquisador '%s' não encontrado!\n", origem_nome);
-        libera_mapa_nomes(map);
-        libera_grafo_p(g);
+void imprime_caminho_bf(int *pai, int destino, int atual) {
+    if (atual == destino) {
+        printf("%d", destino + 1);
         return;
     }
+    if (pai[atual] == -1) {
+        printf("sem caminho");
+        return;
+    }
+    imprime_caminho_bf(pai, destino, pai[atual]);
+    printf(" -> %d", atual + 1);
+}
+// ---------- Estudo de caso (até item 2) ----------
+void estudo_caso_p(Grafo *g, int origem, int *alvos, int k) {
+    float *distV = malloc(g->n * sizeof(float));
+    int *paiV = malloc(g->n * sizeof(int));
+    float *distH = malloc(g->n * sizeof(float));
+    int *paiH = malloc(g->n * sizeof(int));
 
-    float *dist = malloc(g->n * sizeof(float));
-    int *pai = malloc(g->n * sizeof(int));
-
-    printf("\n=== Dijkstra (heap) a partir de '%s' ===\n", origem_nome);
-    dijkstra_heap(g, origem, dist, pai);
-
-    for (int i = 0; i < qtd_destinos; i++) {
-        int destino = indice_por_nome(map, destinos[i]);
-        if (destino == -1) {
-            printf("Pesquisador '%s' não encontrado!\n", destinos[i]);
-            continue;
-        }
-        printf("\nDistância '%s' -> '%s' = %.6f\n", origem_nome, destinos[i], dist[destino]);
-        printf("Caminho: ");
-        imprime_caminho_p(pai, origem, destino);
+    printf("\n=== Dijkstra Vetor ===\n");
+    dijkstra_vetor(g, origem - 1, distV, paiV);
+    for (int i = 0; i < 5; i++) {
+        int t = alvos[i] - 1;
+        printf("Dist(%d -> %d) = %.3f | Caminho: ", origem, alvos[i], distV[t]);
+        imprime_caminho(paiV, origem - 1, t);
         printf("\n");
     }
 
-    free(dist);
-    free(pai);
-    libera_mapa_nomes(map);
-    libera_grafo_p(g);
+    printf("\n=== Dijkstra Heap ===\n");
+    dijkstra_heap(g, origem - 1, distH, paiH);
+    for (int i = 0; i < 5; i++) {
+        int t = alvos[i] - 1;
+        printf("Dist(%d -> %d) = %.3f | Caminho: ", origem, alvos[i], distH[t]);
+        imprime_caminho(paiH, origem - 1, t);
+        printf("\n");
+    }
+
+    // Comparação de tempo médio
+    srand(42);
+    clock_t t0 = clock();
+    for (int i = 0; i < k; i++) {
+        int s = rand() % g->n;
+        dijkstra_vetor(g, s, distV, paiV);
+    }
+    clock_t t1 = clock();
+    for (int i = 0; i < k; i++) {
+        int s = rand() % g->n;
+        dijkstra_heap(g, s, distH, paiH);
+    }
+    clock_t t2 = clock();
+
+    double tv = (double)(t1 - t0) / CLOCKS_PER_SEC / k;
+    double th = (double)(t2 - t1) / CLOCKS_PER_SEC / k;
+    printf("\nTempo médio (k=%d): Vetor = %.6fs | Heap = %.6fs\n", k, tv, th);
+
+    free(distV); free(paiV);
+    free(distH); free(paiH);
 }
+
 
